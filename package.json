@@ -1,0 +1,8 @@
+{
+  "devDependencies": {
+    "parcel-bundler": "^1.8.1"
+  },
+  "dependencies": {
+    "mathjs": "^4.3.0"
+  }
+}
