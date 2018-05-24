@@ -492,6 +492,8 @@ class Renderer {
   }
 }
 
+document.querySelector('#img-box').innerHTML = ''; // reset for HMR
+
 const canvas = document.querySelector('#app');
 canvas.width = 400;
 canvas.height = 300;
@@ -502,6 +504,7 @@ const loadImage = async src => new Promise((resolve, reject) => {
   const image = new Image();
   image.crossOrigin = 'anonymous';
   image.onload = () => {
+    document.querySelector('#img-box').appendChild(image);
     resolve(image);
   };
   image.onerror = reject;
