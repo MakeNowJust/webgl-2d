@@ -1,20 +1,17 @@
 // Constants
 const VERTEX_SIZE = 2;
 const COLOR_SIZE = 4;
-const TEXTURE_SIZE = 1;
 const REGION_SIZE = 2;
 
-const ELEMENT_SIZE = VERTEX_SIZE + COLOR_SIZE + TEXTURE_SIZE + REGION_SIZE;
+const ELEMENT_SIZE = VERTEX_SIZE + COLOR_SIZE + REGION_SIZE;
 const ELEMENT_OFFSET = ELEMENT_SIZE * Float32Array.BYTES_PER_ELEMENT;
 
 const VERTEX_ELEMENT = 0;
 const COLOR_ELEMENT = VERTEX_ELEMENT + VERTEX_SIZE;
-const TEXTURE_ELEMENT = COLOR_ELEMENT + COLOR_SIZE;
-const REGION_ELEMENT = TEXTURE_ELEMENT + TEXTURE_SIZE;
+const REGION_ELEMENT = COLOR_ELEMENT + COLOR_SIZE;
 
 const VERTEX_OFFSET = VERTEX_ELEMENT * Float32Array.BYTES_PER_ELEMENT;
 const COLOR_OFFSET = COLOR_ELEMENT * Float32Array.BYTES_PER_ELEMENT;
-const TEXTURE_OFFSET = TEXTURE_ELEMENT * Float32Array.BYTES_PER_ELEMENT;
 const REGION_OFFSET = REGION_ELEMENT * Float32Array.BYTES_PER_ELEMENT;
 
 const ELEMENTS_PER_QUAD = 4;
@@ -25,9 +22,62 @@ const MAX_LENGTH = 16000;
 class Shader {
   /**
    * @param {WebGLRenderingContext} gl
+   * @param {string} precision
    */
-  constructor(gl) {
+  constructor(gl, precision) {
     this.gl = gl;
+
+    this.vertex = this.createShader(
+      gl.VERTEX_SHADER,
+      `
+        precision highp float;
+
+        attribute vec2 aVertex;
+        attribute vec4 aColor;
+        attribute vec2 aRegion;
+
+        uniform mat3 uMatrix;
+
+        varying vec4 vColor;
+        varying vec2 vRegion;
+
+        void main(void) {
+          gl_Position = vec4((uMatrix * vec3(aVertex, 1)).xy, 0, 1);
+
+          vColor = vec4(aColor.rgb * aColor.a, aColor.a);
+          vRegion = aRegion;
+        }
+      `,
+    );
+
+    this.fragment = this.createShader(
+      gl.FRAGMENT_SHADER,
+      `
+        precision ${precision} float;
+
+        uniform sampler2D uSampler;
+
+        varying vec4 vColor;
+        varying vec2 vRegion;
+
+        void main(void) {
+          gl_FragColor = texture2D(uSampler, vRegion);
+        }
+      `,
+    );
+
+    this.program = this.createProgram(this.vertex, this.fragment);
+
+    this.attributes = {
+      vertex: this.getAttribute('aVertex'),
+      color: this.getAttribute('aColor'),
+      region: this.getAttribute('aRegion'),
+    };
+
+    this.uniforms = {
+      matrix: gl.getUniformLocation(this.program, 'uMatrix'),
+      sampler: gl.getUniformLocation(this.program, 'uSampler'),
+    };
   }
 
   /**
@@ -70,8 +120,6 @@ class Shader {
       throw new Error(`QuadShader.createProgram: failed on program linking:\n${log}`);
     }
 
-    gl.useProgram(program);
-
     return program;
   }
 
@@ -83,88 +131,6 @@ class Shader {
     const location = gl.getAttribLocation(this.program, name)
     gl.enableVertexAttribArray(location);
     return location;
-  }
-}
-
-class QuadShader extends Shader {
-  /**
-   * @param {WebGLRenderingContext} gl
-   * @param {number} maxTexture
-   * @param {string} precision
-   */
-  constructor(gl, maxTexture, precision) {
-    super(gl);
-
-    this.vertex = this.createShader(
-      gl.VERTEX_SHADER,
-      `
-        precision highp float;
-
-        attribute vec2 aVertex;
-        attribute vec4 aColor;
-        attribute float aTexture;
-        attribute vec2 aRegion;
-
-        uniform mat3 uMatrix;
-
-        varying vec4 vColor;
-        varying float vTexture;
-        varying vec2 vRegion;
-
-        void main(void) {
-          gl_Position = vec4((uMatrix * vec3(aVertex, 1)).xy, 0, 1);
-
-          vColor = vec4(aColor.rgb * aColor.a, aColor.a);
-          vTexture = aTexture;
-          vRegion = aRegion;
-        }
-      `,
-    );
-
-    /*
-    const textureSelector = [];
-    textureSelector.push(`if (texture == 0) gl_FragColor = texture2D(uSampler[0], vRegion) * vColor;`);
-    for (let i = 1; i < maxTexture - 1; i++) {
-      textureSelector.push(`else if (texture == ${i}) gl_FragColor = texture2D(uSampler[${i}], vRegion) * vColor;`)
-    }
-    textureSelector.push(`else gl_FragColor = texture2D(uSampler[${maxTexture - 1}], vRegion) * vColor;`)
-    */
-
-    this.fragment = this.createShader(
-      gl.FRAGMENT_SHADER,
-      `
-        precision ${precision} float;
-
-        /*uniform sampler2D uSampler[${maxTexture}];*/
-        uniform sampler2D uSampler;
-
-        varying vec4 vColor;
-        varying float vTexture;
-        varying vec2 vRegion;
-
-        void main(void) {
-          int texture = int(vTexture);
-
-          gl_FragColor = texture2D(uSampler, vRegion);
-          ${/*textureSelector.join(`
-          `)*/''}
-        }
-      `,
-    );
-
-    this.program = this.createProgram(this.vertex, this.fragment);
-
-    this.attributes = {
-      vertex: this.getAttribute('aVertex'),
-      color: this.getAttribute('aColor'),
-      texture: this.getAttribute('aTexture'),
-      region: this.getAttribute('aRegion'),
-    };
-
-    this.uniforms = {
-      matrix: gl.getUniformLocation(this.program, 'uMatrix'),
-      sampler: gl.getUniformLocation(this.program, 'uSampler'),
-    };
   }
 }
 
@@ -180,14 +146,11 @@ class Renderer {
     this.canvas = canvas;
     this.gl = gl;
 
-    const maxTextures = Math.min(24, gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS));
-    const {precision} = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
-    const precisionName = precision < 16 ? 'mediump' : 'highp';
+    const {precision: precisionSize} = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
+    const precision = precisionSize < 16 ? 'mediump' : 'highp';
 
-    this.maxTextures = maxTextures;
-    this.precision = precisionName;
-
-    this.shader = new QuadShader(gl, maxTextures, precisionName);
+    this.shader = new Shader(gl, precision);
+    gl.useProgram(this.shader.program);
 
     // Stream buffer
     this.sb = gl.createBuffer();
@@ -208,8 +171,6 @@ class Renderer {
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ib);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, this.createIB(), gl.STATIC_DRAW);
 
-    console.log(this.shader.attributes);
-
     // Bind attribute pointers
     gl.vertexAttribPointer(
       this.shader.attributes.vertex,
@@ -228,14 +189,6 @@ class Renderer {
       COLOR_OFFSET
     );
     gl.vertexAttribPointer(
-      this.shader.attributes.texture,
-      TEXTURE_SIZE,
-      gl.FLOAT,
-      false,
-      ELEMENT_OFFSET,
-      TEXTURE_OFFSET
-    );
-    gl.vertexAttribPointer(
       this.shader.attributes.region,
       REGION_SIZE,
       gl.FLOAT,
@@ -244,21 +197,13 @@ class Renderer {
       REGION_OFFSET
     );
 
-    gl.useProgram(this.shader.program);
     this.reset();
     this.setProjection(canvas.width, canvas.height);
-
-    this.units = [];
-    for (let i = 0; i < maxTextures; i++) {
-      this.units.push(i);
-    }
-    this.cache = new Map();
 
     this.color = [1, 1, 1, 1];
 
     // Initialize claer color and alpha blend function
-    gl.clearColor(...this.color);
-    gl.clearDepth(1.0);
+    gl.clearColor(0, 0, 0, 1);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 1);
@@ -270,14 +215,16 @@ class Renderer {
    */
   setProjection(width, height) {
     const gl = this.gl;
+
+    this.flush();
+
     const matrix = [
       2 / width, 0, 0,
       0, -2 / height, 0,
       -1, 1, 1,
     ];
-    console.log('matrix', matrix);
 
-    gl.viewport(-width, -height, width, height);
+    gl.viewport(0, 0, width, height);
     gl.uniformMatrix3fv(
       this.shader.uniforms.matrix,
       false,
@@ -285,18 +232,25 @@ class Renderer {
     );
   }
 
+  uploadImage(image) {
+    const gl = this.gl;
+    const texture = gl.createTexture();
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    return texture;
+  }
+
   reset() {
     const gl = this.gl;
 
     this.sbOffset = 0;
     this.length = 0;
-
-    /*
-    const samplers = new Array(this.maxTextures);
-    for (let i = 0; i < this.maxTextures; i++) {
-      samplers[i] = i;
-    }
-    */
 
     gl.uniform1i(this.shader.uniforms.sampler, 0);
   }
@@ -310,16 +264,14 @@ class Renderer {
       const gl = this.gl;
 
       const length = this.length * ELEMENT_SIZE * ELEMENTS_PER_QUAD;
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.sb);
       gl.bufferSubData(
         gl.ARRAY_BUFFER,
         0,
         this.stream.subarray(0, length),
       );
-      console.log('stream', this.stream.subarray(0, length));
 
       gl.drawElements(
-        gl.TRIANGLE_STRIP,
+        gl.TRIANGLES,
         this.length * INDICES_PER_QUAD,
         gl.UNSIGNED_SHORT,
         0,
@@ -341,7 +293,7 @@ class Renderer {
    * @param {number} regionWidth
    * @param {number} regionHeight
    */
-  drawImage(image, x, y, width, height, regionX, regionY, regionWidth, regionHeight) {
+  drawImage(texture, x, y, width, height, regionX, regionY, regionWidth, regionHeight) {
     if (this.length >= MAX_LENGTH) {
       this.flush();
     }
@@ -365,15 +317,12 @@ class Renderer {
 
     const color = this.color;
 
-    const unit = this.uploadImage(image);
-
     const imageWidth = image.naturalWidth;
     const imageHeight = image.naturalHeight;
     const r0 = regionX / imageWidth;
     const r1 = regionY / imageHeight;
     const r2 = (regionX + regionWidth) / imageWidth;
     const r3 = (regionY + regionHeight) / imageHeight;
-    console.log('r', r0, r1, r2, r3);
 
     this.stream[idx0 + VERTEX_ELEMENT + 0] = x0;
     this.stream[idx0 + VERTEX_ELEMENT + 1] = y0;
@@ -389,11 +338,6 @@ class Renderer {
     this.stream.set(color, idx2 + COLOR_ELEMENT);
     this.stream.set(color, idx3 + COLOR_ELEMENT);
 
-    this.stream[idx0 + TEXTURE_ELEMENT] = unit;
-    this.stream[idx1 + TEXTURE_ELEMENT] = unit;
-    this.stream[idx2 + TEXTURE_ELEMENT] = unit;
-    this.stream[idx3 + TEXTURE_ELEMENT] = unit;
-
     this.stream[idx0 + REGION_ELEMENT + 0] = r0;
     this.stream[idx0 + REGION_ELEMENT + 1] = r1;
     this.stream[idx1 + REGION_ELEMENT + 0] = r2;
@@ -405,30 +349,6 @@ class Renderer {
 
     this.sbOffset += ELEMENT_SIZE * ELEMENTS_PER_QUAD;
     this.length += 1;
-  }
-
-  uploadImage(image) {
-    if (this.cache.has(image)) {
-      return this.cache.get(image).unit;
-    }
-
-    const gl = this.gl;
-    const unit = this.units.shift();
-    const texture = gl.createTexture();
-
-    console.log('texture', texture);
-    console.log('unit', unit, gl.TEXTURE0);
-
-    gl.activeTexture(gl.TEXTURE0 + unit);
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
-    this.cache.set(image, {unit, texture});
-
-    return unit;
   }
 
   /**
@@ -471,10 +391,12 @@ const image = new Image();
 image.crossOrigin = 'anonymous';
 image.onload = () => {
   renderer.clear();
-  renderer.drawImage(image, 0, 0, 256, 256, 0, 0, 256, 256);
+  const texture = renderer.uploadImage(image);
+  renderer.drawImage(texture, 0, 0, 256, 256, 0, 0, 256, 256);
+  renderer.drawImage(texture, 100, 100, 100, 100, 0, 0, 256, 256);
+  renderer.drawImage(texture, 0, 0, 100, 100, 0, 0, 256, 256);
   renderer.flush();
   renderer.gl.flush();
-  console.log(renderer);
 
   document.body.appendChild(image);
 };
