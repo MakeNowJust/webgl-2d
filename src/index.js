@@ -242,7 +242,8 @@ class Renderer {
     this.setProjection(canvas.width, canvas.height);
 
     this.nextUnit = 0;
-    this.cache = new Map();
+    this.textureCache = new Map();
+    this.unitCache = new Map();
 
     this.color = [1, 1, 1, 1];
 
@@ -297,24 +298,45 @@ class Renderer {
   }
 
   uploadImage(image) {
-    if (this.cache.has(image)) {
-      return this.cache.get(image);
+    let unit = this.unitCache.get(image);
+    if (unit !== undefined) {
+      return unit;
     }
 
     const gl = this.gl;
-    const texture = gl.createTexture();
 
-    const unit = this.nextUnit;
+    if (this.nextUnit >= this.maxTextures) {
+      this.flush();
+      gl.flush();
+      for (let i = 0; i < this.maxTextures; i++) {
+        gl.activeTexture(gl.TEXTURE0 + i);
+        gl.bindTexture(gl.TEXTURE_2D, this.emptyTexture);
+      }
+      this.unitCache.clear();
+      this.nextUnit = 0;
+    }
+
+    unit = this.nextUnit;
     this.nextUnit += 1;
 
-    gl.activeTexture(gl.TEXTURE0 + unit);
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    let texture = this.textureCache.get(image);
+    if (texture === undefined) {
+      texture = gl.createTexture();
 
-    this.cache.set(image, unit);
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+      this.textureCache.set(image, texture);
+    } else {
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+    }
+
+    this.unitCache.set(image, unit);
 
     return unit;
   }
@@ -391,6 +413,8 @@ class Renderer {
       this.resizeSB();
     }
 
+    const unit = this.uploadImage(image);
+
     const idx0 = this.sbOffset;
     const idx1 = idx0 + ELEMENT_SIZE;
     const idx2 = idx1 + ELEMENT_SIZE;
@@ -427,8 +451,6 @@ class Renderer {
     const r1 = regionY / imageHeight;
     const r2 = (regionX + regionWidth) / imageWidth;
     const r3 = (regionY + regionHeight) / imageHeight;
-
-    const unit = this.uploadImage(image);
 
     this.stream[idx0 + VERTEX_ELEMENT + 0] = v0[0];
     this.stream[idx0 + VERTEX_ELEMENT + 1] = v0[1];
@@ -516,8 +538,8 @@ const delay = async ms => new Promise(resolve => setTimeout(resolve, ms));
 const nextFrame = async () => new Promise(resolve => requestAnimationFrame(resolve));
 
 const main = async () => {
-  const image = await loadImage('https://picsum.photos/100/100');
   const move = await loadImage('https://picsum.photos/50/50');
+  const image = await loadImage('https://picsum.photos/100/100');
   const bg = await loadImage('https://picsum.photos/400/300');
 
 
@@ -527,8 +549,8 @@ const main = async () => {
     renderer.clear();
     renderer.drawImage(bg, 0, 0, 400, 300, 0, 0, 400, 300);
     renderer.drawImage(image, 150, 100, 100, 100, 0, 0, 100, 100, -i / 180 * Math.PI, 50, 50);
-    renderer.drawImage(image, 150 + 125, 100, 100, 100, 0, 0, 100, 100);
-    renderer.drawImage(image, 150 - 125, 100, 100, 100, 0, 0, 100, 100);
+    renderer.drawImage(image, 150 + 125, 100, 100, 100, 0, 0, 100, 100, i / 180 * Math.PI, 50, 50);
+    renderer.drawImage(image, 150 - 125, 100, 100, 100, 0, 0, 100, 100, i / 180 * Math.PI, 50, 50);
     renderer.drawImage(move, 175, 125, 50, 50, 0, 0, 50, 50, i / 180 * Math.PI, 25, 25);
     renderer.flush();
     renderer.gl.flush();
