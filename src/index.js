@@ -1,8 +1,5 @@
 import 'babel-polyfill';
 
-import Matrix3 from 'math.gl/src/matrix3';
-console.log(Matrix3);
-
 // Constants
 const VERTEX_SIZE = 2;
 const COLOR_SIZE = 4;
@@ -307,12 +304,14 @@ class Renderer {
 
     gl.uniform1iv(this.shader.uniforms.sampler, sampler);
 
+    const texture = gl.createTexture();
+    const buffer = new Uint8Array([255, 0, 0, 255]); // WARNING RED!
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, buffer);
+
     for (let i = 0; i < this.maxTextures; i++) {
-      const texture = gl.createTexture();
-      const buffer = new Uint8Array([255, 0, 0, 255]); // WARNING RED!
       gl.activeTexture(gl.TEXTURE0 + i);
       gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, buffer);
     }
   }
 
