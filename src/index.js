@@ -542,7 +542,6 @@ const main = async () => {
   const image = await loadImage('https://picsum.photos/100/100');
   const bg = await loadImage('https://picsum.photos/400/300');
 
-
   let i = 0;
   for (;;) {
 
