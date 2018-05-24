@@ -465,17 +465,31 @@ const loadImage = async src => new Promise((resolve, reject) => {
   image.src = src;
 });
 
+const delay = async ms => new Promise(resolve => setTimeout(resolve, ms));
+const nextFrame = async () => new Promise(resolve => requestAnimationFrame(resolve));
+
 const main = async () => {
   const image = await loadImage('https://picsum.photos/100/100');
+  const move = await loadImage('https://picsum.photos/50/50');
   const bg = await loadImage('https://picsum.photos/400/300');
 
-  renderer.clear();
-  renderer.drawImage(bg, 0, 0, 400, 300, 0, 0, 400, 300);
-  renderer.drawImage(image, 150, 100, 100, 100, 0, 0, 100, 100);
-  renderer.drawImage(image, 150 + 125, 100, 100, 100, 0, 0, 100, 100);
-  renderer.drawImage(image, 150 - 125, 100, 100, 100, 0, 0, 100, 100);
-  renderer.flush();
-  renderer.gl.flush();
+  let i = 0;
+  for (;;) {
+    renderer.clear();
+    renderer.drawImage(bg, 0, 0, 400, 300, 0, 0, 400, 300);
+    renderer.drawImage(image, 150, 100, 100, 100, 0, 0, 100, 100);
+    renderer.drawImage(image, 150 + 125, 100, 100, 100, 0, 0, 100, 100);
+    renderer.drawImage(image, 150 - 125, 100, 100, 100, 0, 0, 100, 100);
+    for (let j = 1; j <= 100; j++) {
+      renderer.drawImage(move, (175 + i + Math.random() * j) % 400, (125 + i + Math.random() * j) % 300, 50, 50, 0, 0, 50, 50);
+    }
+    renderer.flush();
+    renderer.gl.flush();
+
+    i += 1;
+
+    await nextFrame();
+  }
 };
 
 main();
