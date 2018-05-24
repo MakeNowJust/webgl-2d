@@ -1,5 +1,8 @@
 import 'babel-polyfill';
 
+import vec2 from 'gl-vec2';
+import mat3 from 'gl-mat3';
+
 // Constants
 const VERTEX_SIZE = 2;
 const COLOR_SIZE = 4;
@@ -243,11 +246,31 @@ class Renderer {
 
     this.color = [1, 1, 1, 1];
 
+    // Pre-allocated vectors
+    this.vectors = [
+      [0, 0],
+      [0, 0],
+      [0, 0],
+      [0, 0],
+      [0, 0],
+    ];
+
+    // Pre-allocated matrix
+    this.matrix = [
+      1, 0, 0,
+      0, 1, 0,
+      0, 0, 1,
+    ];
+
     // Initialize claer color and alpha blend function
-    gl.clearColor(0, 0, 0, 1);
+    this.setClearColor(0, 0, 0, 1);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 1);
+  }
+
+  setClearColor(r, g, b, a) {
+    this.gl.clearColor(r, g, b, a);
   }
 
   /**
@@ -259,7 +282,7 @@ class Renderer {
 
     this.flush();
 
-    const matrix = [
+    this.uMatrix = [
       2 / width, 0, 0,
       0, -2 / height, 0,
       -1, 1, 1,
@@ -269,7 +292,7 @@ class Renderer {
     gl.uniformMatrix3fv(
       this.shader.uniforms.matrix,
       false,
-      matrix,
+      this.uMatrix,
     );
   }
 
@@ -352,8 +375,15 @@ class Renderer {
    * @param {number} regionY
    * @param {number} regionWidth
    * @param {number} regionHeight
+   * @param {number} rotateAngle
+   * @param {number} rotateOriginX
+   * @param {number} rotateOriginY
    */
-  drawImage(image, x, y, width, height, regionX, regionY, regionWidth, regionHeight) {
+  drawImage(image, x, y, width, height, regionX, regionY, regionWidth, regionHeight, rotateAngle = 0, rotateOriginX = 0, rotateOriginY = 0) {
+    if (this.color[3] <  1 / 256) {
+      return;
+    }
+
     if (this.length >= MAX_LENGTH) {
       this.flush();
     }
@@ -366,14 +396,28 @@ class Renderer {
     const idx2 = idx1 + ELEMENT_SIZE;
     const idx3 = idx2 + ELEMENT_SIZE;
 
-    const x0 = x;
-    const y0 = y;
-    const x1 = x + width;
-    const y1 = y;
-    const x2 = x;
-    const y2 = y + height;
-    const x3 = x + width;
-    const y3 = y + height;
+    const v0 = this.vectors[0];
+    v0[0] = x; v0[1] = y;
+    const v1 = this.vectors[1];
+    v1[0] = x + width; v1[1] = y;
+    const v2 = this.vectors[2];
+    v2[0] = x; v2[1] = y + height;
+    const v3 = this.vectors[3];
+    v3[0] = x + width; v3[1] = y + height;
+
+    if (rotateAngle !== 0) {
+      const translate = this.vectors[4];
+      mat3.identity(this.matrix);
+      translate[0] = x + rotateOriginX; translate[1] = y + rotateOriginY;
+      mat3.translate(this.matrix, this.matrix, translate);
+      mat3.rotate(this.matrix, this.matrix, rotateAngle);
+      translate[0] *= -1; translate[1] *= -1;
+      mat3.translate(this.matrix, this.matrix, translate);
+      vec2.transformMat3(v0, v0, this.matrix);
+      vec2.transformMat3(v1, v1, this.matrix);
+      vec2.transformMat3(v2, v2, this.matrix);
+      vec2.transformMat3(v3, v3, this.matrix);
+    }
 
     const color = this.color;
 
@@ -386,14 +430,14 @@ class Renderer {
 
     const unit = this.uploadImage(image);
 
-    this.stream[idx0 + VERTEX_ELEMENT + 0] = x0;
-    this.stream[idx0 + VERTEX_ELEMENT + 1] = y0;
-    this.stream[idx1 + VERTEX_ELEMENT + 0] = x1;
-    this.stream[idx1 + VERTEX_ELEMENT + 1] = y1;
-    this.stream[idx2 + VERTEX_ELEMENT + 0] = x2;
-    this.stream[idx2 + VERTEX_ELEMENT + 1] = y2;
-    this.stream[idx3 + VERTEX_ELEMENT + 0] = x3;
-    this.stream[idx3 + VERTEX_ELEMENT + 1] = y3;
+    this.stream[idx0 + VERTEX_ELEMENT + 0] = v0[0];
+    this.stream[idx0 + VERTEX_ELEMENT + 1] = v0[1];
+    this.stream[idx1 + VERTEX_ELEMENT + 0] = v1[0];
+    this.stream[idx1 + VERTEX_ELEMENT + 1] = v1[1];
+    this.stream[idx2 + VERTEX_ELEMENT + 0] = v2[0];
+    this.stream[idx2 + VERTEX_ELEMENT + 1] = v2[1];
+    this.stream[idx3 + VERTEX_ELEMENT + 0] = v3[0];
+    this.stream[idx3 + VERTEX_ELEMENT + 1] = v3[1];
 
     this.stream.set(color, idx0 + COLOR_ELEMENT);
     this.stream.set(color, idx1 + COLOR_ELEMENT);
@@ -473,16 +517,16 @@ const main = async () => {
   const move = await loadImage('https://picsum.photos/50/50');
   const bg = await loadImage('https://picsum.photos/400/300');
 
+
   let i = 0;
   for (;;) {
+
     renderer.clear();
     renderer.drawImage(bg, 0, 0, 400, 300, 0, 0, 400, 300);
-    renderer.drawImage(image, 150, 100, 100, 100, 0, 0, 100, 100);
+    renderer.drawImage(image, 150, 100, 100, 100, 0, 0, 100, 100, -i / 180 * Math.PI, 50, 50);
     renderer.drawImage(image, 150 + 125, 100, 100, 100, 0, 0, 100, 100);
     renderer.drawImage(image, 150 - 125, 100, 100, 100, 0, 0, 100, 100);
-    for (let j = 1; j <= 100; j++) {
-      renderer.drawImage(move, (175 + i + Math.random() * j) % 400, (125 + i + Math.random() * j) % 300, 50, 50, 0, 0, 50, 50);
-    }
+    renderer.drawImage(move, 175, 125, 50, 50, 0, 0, 50, 50, i / 180 * Math.PI, 25, 25);
     renderer.flush();
     renderer.gl.flush();
 
